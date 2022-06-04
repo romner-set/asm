@@ -1,12 +1,12 @@
 @echo off
-if exist ".\build" (
+if exist "%~dp0build" (
     echo [90mINFO: [37mbuild dir found[31m
 ) else (
     echo [90mINFO: [37mcreating build dir...[31m
     mkdir build
 )
 echo [90mINFO: [37massembling code into object file...[31m
-nasm -f win64 src/main.asm -o build\main.obj
+nasm -f win64 src\main.asm -o build\main.obj
 echo [90mINFO: [37mlinking object file into executable...[91m
 link /wx /nologo /entry:start /subsystem:console "%~dp0build\main.obj" kernel32.lib /out:"%~dp0build\main.exe"
 
