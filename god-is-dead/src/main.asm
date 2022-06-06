@@ -111,6 +111,15 @@ extern HeapFree
     check_err
 %endmacro
 
+%macro parse_str 2
+    mov rcx, %1
+    mov rdx, %2
+    call parse_string
+%endmacro
+%macro parse_str 1
+    parse_str %1, -1
+%endmacro
+
 %macro copy_str 2
     copy_str %1, %2, -1
 %endmacro
@@ -119,6 +128,15 @@ extern HeapFree
     mov rdx, %2
     mov r8,  %3
     call copy_strf
+%endmacro
+
+%macro clear_str 1
+    clear_str %1, -1
+%endmacro
+%macro clear_str 2
+    mov rcx, %1
+    mov rdx, %2
+    call clear_strf
 %endmacro
 
 %macro q 1
@@ -137,16 +155,17 @@ section .rodata
     MAX_KEY_SIZE      equ 16
 
 section .data
-    HEAP_HANDLE   dq  0
-    STDOUT        dq  0
-    STDIN         dq  0
+    HEAP_HANDLE     dq  0
+    STDOUT          dq  0
+    STDIN           dq  0
 
-    INPUT_BUFFER  dq  0
-    INPUT_LEN     dq  0
+    INPUT_BUFFER    dq  0
+    INPUT_LEN       dq  0
 
-    THREAD_COUNT  dq  0
-    START_AT      dq  0
-    START_AT_LEN  dq  0
+    THREAD_COUNT    dq  0
+    OPS_PER_THREAD  dq  1
+    START_AT        dq  0
+    START_AT_LEN    dq  0
 
 section .text
     global start
@@ -158,7 +177,9 @@ section .text
     input_tc_sdef   db  "a default of ",0
     input_tc_st     db  " threads.",0
 
-    input_sa        db  "Input start_at value (empty for default): ",0
+    input_opt       db  "Input operations per thread-iteration (empty for def.):"
+
+    input_sa        db  "Input start_at value (empty for def.): ",0
 
     ok     db  "SUCCESS",0
     errs   db  "ERROR CODE ",0
@@ -200,32 +221,55 @@ start:
     check_err
 
 ;--------------THREAD SELECT--------------;
-    input_tcs: prints input_tc
-
     heap_alloc 256
     mov [INPUT_BUFFER], rax
+
+    input_tcs: prints input_tc
 
     call input
 
     cmp qword  [INPUT_LEN], 0
     je  if_tc_null
-        mov  rcx,  INPUT_BUFFER
-        mov  rdx, [INPUT_LEN]
-        call parse_string
+        parse_str INPUT_BUFFER, [INPUT_LEN]
         cmp  rax,  0
         jne  if_tc_valid
             prints input_inv
+            clear_str INPUT_BUFFER
             jmp    input_tcs
         if_tc_valid:
-            mov [THREAD_COUNT], rax
+            mov [OPS_PER_THREAD], rax
             prints  input_tc_s
     jmp if_tc_null_end
     if_tc_null:
         prints  input_tc_s
         prints  input_tc_sdef
     if_tc_null_end:
-    printi [THREAD_COUNT]
+    printi [OPS_PER_THREAD]
     prints input_tc_st, 1
+
+;--------------OPS PER THREAD SELECT--------------;
+    input_opts: printi input_opt
+
+    call input
+
+    cmp qword  [INPUT_LEN], 0
+    je  if_opt_null
+        parse_str INPUT_BUFFER, [INPUT_LEN]
+        cmp  rax,  0
+        jne  if_opt_valid
+            prints input_inv
+            clear_str INPUT_BUFFER
+            jmp    input_opts
+        if_opt_valid:
+            mov [THREAD_COUNT], rax
+            prints  input_opt_s
+    jmp if_opt_null_end
+    if_opt_null:
+        prints  input_opt_s
+        prints  input_opt_sdef
+    if_opt_null_end:
+    printi [THREAD_COUNT]
+    prints input_opt_st, 1
 
 ;--------------START AT SELECT--------------;
     heap_alloc MAX_KEY_SIZE
@@ -240,6 +284,7 @@ start:
         cmp qword [INPUT_LEN], MAX_KEY_SIZE
         jle if_sa_valid
             prints input_inv
+            clear_str INPUT_BUFFER
             jmp    input_sas
         if_sa_valid:
             copy_str   INPUT_BUFFER, [START_AT]
@@ -251,13 +296,15 @@ start:
         mov qword [START_AT_LEN], 3
         mov [START_AT],           rax
     if_sa_null_end:
-    prints [START_AT], 1
+    prints [START_AT], 1, [START_AT_LEN]
     printi [START_AT_LEN]
 
     endl 2
     prints ok
     xor  rcx, rcx
 call ExitProcess
+
+
 
 copy_strf: ;src ptr rcx IN, dest ptr rdx IN, optional len r8 IN
     push_all
@@ -267,10 +314,10 @@ copy_strf: ;src ptr rcx IN, dest ptr rdx IN, optional len r8 IN
     cmp r8, -1
     jne copy_strf_len_known
     copy_strf_loop:
-        mov  r9b, [rcx]
-        mov  dl,  r9b
-        inc rcx
-        inc rdx
+        mov  r9b,  [rcx]
+        mov [rdx],  r9b
+        inc  rcx
+        inc  rdx
     cmp byte [rcx], 0
     jne copy_strf_loop
     jmp copy_strf_ret
@@ -279,13 +326,43 @@ copy_strf: ;src ptr rcx IN, dest ptr rdx IN, optional len r8 IN
     mov  rcx, r8
     pop  r8
     copy_strfk_loop:
-        mov  r9b, [r8]
-        mov  dl,  r9b
-        inc r8
-        inc rdx
+        mov  r9b,  [r8]
+        mov [rdx],  r9b
+        inc  r8
+        inc  rdx
     loop copy_strfk_loop
 
     copy_strf_ret:
+    pop_all
+ret
+
+clear_strf: ;ptr rcx IN, optional len rdx IN
+    push_all
+
+    cmp rdx, 0
+    je  clear_strf_ret
+    cmp rdx, -1
+    jne clear_strf_len_known
+    clear_strf_loop:
+        mov byte [rcx], 0
+        inc       rcx
+        inc r14
+        push rcx
+        printi r14
+        pop rcx
+    cmp byte [rcx], 0
+    jne clear_strf_loop
+    jmp clear_strf_ret
+    clear_strf_len_known:
+    push rcx
+    mov  rcx, rdx
+    pop  rdx
+    clear_strfk_loop:
+        mov byte [rdx], 0
+        inc       rdx
+    loop clear_strfk_loop
+
+    clear_strf_ret:
     pop_all
 ret
 
@@ -308,7 +385,7 @@ parse_string: ;string ptr rcx IN, len rdx IN, u64 rax OUT
     xor rax, rax
     mov r8,  rcx
     xor r9,  r9
-    mov  r10, 10
+    mov r10, 10
 
     parse_string_loop:
         mov       r9b,   byte [r8]
@@ -388,13 +465,13 @@ print_bytes: ;ptr rcx IN, length rdx IN
         inc     rdx
 
         push   rcx
-        ;push   rdx
+        push   rdx
         mov    cl, byte [rdx]
         printi rcx, 0, 16, 0
         push   byte ' '
         prints rsp, 0, 1
         dec    rsp
-        ;pop    rdx
+        pop    rdx
         pop    rcx
     loop print_bytes_loop
 
