@@ -10,179 +10,51 @@ extern GetSystemInfo
 extern GetProcessHeap
 extern HeapAlloc
 extern HeapFree
-
-
-%macro endl 0
-    endl 1
-%endmacro
-%macro endl 1
-    ;push_all
-    mov rcx, %1
-    call endlf
-    ;pop_all
-%endmacro
-
-%macro printi 1
-    printi %1,  0, 10, 1
-%endmacro
-%macro printi 2
-    printi %1, %2, 10, 1
-%endmacro
-%macro printi 3
-    printi %1, %2, %3, 1
-%endmacro
-%macro printi 4
-    ;push_all
-    mov  rcx, %1
-    mov  rdx, %3
-    mov  r8,  %4
-    call print_int
-    endl %2
-    ;pop_all
-%endmacro
-
-%macro prints 1
-    prints %1, 0, -1
-%endmacro
-%macro prints 2
-    prints %1, %2, -1
-%endmacro
-%macro prints 3
-    ;push_all
-    mov  rcx, %1
-    mov  rdx, %3
-    call print_str
-    endl %2
-    ;pop_all
-%endmacro
-
-%macro printb 2
-    printb %1, %2, 0
-%endmacro
-%macro printb 3
-    ;push_all
-    mov rcx, %1
-    mov rdx, %2
-    call print_bytes
-    endl %3
-    ;pop_all
-%endmacro
-
-%macro check_err 0
-    cmp rax,  0
-    je  err
-%endmacro
-
-%macro push_all 0
-    push r15
-    push r14
-    push r13
-    push r12
-    push r11
-    push r10
-    push r9
-    push r8
-    push rdx
-    push rcx
-    push rbx
-    push rax
-%endmacro
-
-%macro pop_all 0
-    pop rax
-    pop rbx
-    pop rcx
-    pop rdx
-    pop r8
-    pop r9
-    pop r10
-    pop r11
-    pop r12
-    pop r13
-    pop r14
-    pop r15
-%endmacro
-
-%macro heap_alloc 1
-    mov r8,   %1
-    mov rdx,  0
-    mov rcx, [HEAP_HANDLE]
-    call HeapAlloc
-    check_err
-%endmacro
-
-%macro parse_str 2
-    mov rcx, %1
-    mov rdx, %2
-    call parse_string
-%endmacro
-%macro parse_str 1
-    parse_str %1, -1
-%endmacro
-
-%macro copy_str 2
-    copy_str %1, %2, -1
-%endmacro
-%macro copy_str 3
-    mov rcx, %1
-    mov rdx, %2
-    mov r8,  %3
-    call copy_strf
-%endmacro
-
-%macro clear_str 1
-    clear_str %1, -1
-%endmacro
-%macro clear_str 2
-    mov rcx, %1
-    mov rdx, %2
-    call clear_strf
-%endmacro
-
-%macro q 1
-    push qword %1
-    prints rsp
-    add rsp, 8
-%endmacro
+extern GetSystemTime
+extern GetTimeZoneInformation
 
 
 section .rodata
-    dec_table         db  "0123456789"
-    hex_table         db  "0123456789ABCDEF"
+    dec_table         db  "0123456789",0
+    hex_table         db  "0123456789ABCDEF",0
     CRLF              db  0x0D, 0x0A
     STD_INPUT_HANDLE  equ -10
     STD_OUTPUT_HANDLE equ -11
     MAX_KEY_SIZE      equ 16
 
 section .data
-    HEAP_HANDLE     dq  0
-    STDOUT          dq  0
-    STDIN           dq  0
+    HEAP_HANDLE       dq  0
+    STDOUT            dq  0
+    STDIN             dq  0
 
-    INPUT_BUFFER    dq  0
-    INPUT_LEN       dq  0
+    CURRENT_TIME      dq  0
+    CURRENT_TIMEZONE  dq  0
 
-    THREAD_COUNT    dq  0
-    OPS_PER_THREAD  dq  1
-    START_AT        dq  0
-    START_AT_LEN    dq  0
+    INPUT_BUFFER      dq  0
+    INPUT_LEN         dq  0
+
+    THREAD_COUNT      dq  0
+    OPS_PER_THREAD    dq  1
+    START_AT          dq  0
+    START_AT_LEN      dq  0
 
 section .text
     global start
 
-    input_inv       db  "Invalid, try again. ",0
+    input_inv         db  "Invalid, try again. ",0
+    input_s           db  "Selected ",0
+    input_sdef        db  "a default of ",0
     
-    input_tc        db  "Input thread count (empty for default): ",0
-    input_tc_s      db  "Selected ",0
-    input_tc_sdef   db  "a default of ",0
-    input_tc_st     db  " threads.",0
+    input_tc          db  "Input thread count (empty for default): ",0
+    input_tc_t        db  " threads.",0
 
-    input_opt       db  "Input operations per thread-iteration (empty for def.):"
+    input_opt         db  "Input operations per thread-iteration (empty for def.):",0
+    input_opt_o       db  " operations per thread.",0
 
-    input_sa        db  "Input start_at value (empty for def.): ",0
+    input_sa          db  "Input start_at value (empty for def.): ",0
 
-    ok     db  "SUCCESS",0
-    errs   db  "ERROR CODE ",0
+    ok    db  "SUCCESS",0
+    errs  db  "ERROR CODE ",0
 
 
 start:
@@ -196,9 +68,19 @@ start:
     mov [STDIN],  rax
 
 ;--------------SETUP HEAP--------------;
-    call    GetProcessHeap
-    mov    [HEAP_HANDLE], rax
+    call GetProcessHeap
+    mov [HEAP_HANDLE], rax
     ;printi [HEAP_HANDLE], 1, 16
+
+    heap_alloc 16
+    mov [CURRENT_TIME], rax
+
+    heap_alloc 172
+    mov [CURRENT_TIMEZONE], rax
+
+    call print_time_str
+
+    endl
 
 ;--------------GET LCC--------------;
     heap_alloc 64
@@ -237,18 +119,18 @@ start:
             clear_str INPUT_BUFFER
             jmp    input_tcs
         if_tc_valid:
-            mov [OPS_PER_THREAD], rax
-            prints  input_tc_s
+            mov [THREAD_COUNT], rax
+            prints  input_s
     jmp if_tc_null_end
     if_tc_null:
-        prints  input_tc_s
-        prints  input_tc_sdef
+        prints  input_s
+        prints  input_sdef
     if_tc_null_end:
-    printi [OPS_PER_THREAD]
-    prints input_tc_st, 1
+    printi [THREAD_COUNT]
+    prints input_tc_t, 1
 
 ;--------------OPS PER THREAD SELECT--------------;
-    input_opts: printi input_opt
+    input_opts: prints input_opt
 
     call input
 
@@ -261,15 +143,15 @@ start:
             clear_str INPUT_BUFFER
             jmp    input_opts
         if_opt_valid:
-            mov [THREAD_COUNT], rax
-            prints  input_opt_s
+            mov [OPS_PER_THREAD], rax
+            prints  input_s
     jmp if_opt_null_end
     if_opt_null:
-        prints  input_opt_s
-        prints  input_opt_sdef
+        prints  input_s
+        prints  input_sdef
     if_opt_null_end:
-    printi [THREAD_COUNT]
-    prints input_opt_st, 1
+    printi [OPS_PER_THREAD]
+    prints input_opt_o, 1
 
 ;--------------START AT SELECT--------------;
     heap_alloc MAX_KEY_SIZE
@@ -298,6 +180,9 @@ start:
     if_sa_null_end:
     prints [START_AT], 1, [START_AT_LEN]
     printi [START_AT_LEN]
+    
+;--------------START COMPUTE ST--------------;
+
 
     endl 2
     prints ok
@@ -305,6 +190,118 @@ start:
 call ExitProcess
 
 
+
+print_time_str: ;rcx optional hour offset
+    mov rcx, [CURRENT_TIME]
+    call GetSystemTime
+    mov rcx, [CURRENT_TIME]
+    
+    mov  ax, word [rcx+8]
+    push rax
+
+    mov   rcx, [CURRENT_TIMEZONE]
+    call  GetTimeZoneInformation
+    mov   rcx, [CURRENT_TIMEZONE]
+    movsx rdx, dword [rcx]
+    ;push_all
+    ;printi rdx,1,2
+    ;pop_all
+
+    pop rax
+    ;add rax, rdx
+
+    printi rax
+    push qword ':'
+    prints rsp, 0, 1
+    
+    mov rcx, [CURRENT_TIME]
+    mov ax, word [rcx+10]
+    printi rax
+    prints rsp
+    
+    mov rcx, [CURRENT_TIME]
+    mov ax, word [rcx+12]
+    printi rax
+    push qword '.'
+    prints rsp
+    add rsp,16
+
+    xor rax, rax
+    
+    mov rcx, [CURRENT_TIME]
+    mov ax, word [rcx+14]
+    printi rax
+ret
+
+min_to_hmin:
+
+ret
+
+get_unix_time: ;rax OUT
+    push rcx
+    push rdx
+    push r8
+    push r9
+    mov rcx, [CURRENT_TIME]
+    call GetSystemTime
+
+    mov rcx, [CURRENT_TIME]
+    xor rax,  rax
+    xor rdx,  rdx
+    mov ax, word [rcx]
+    sub ax, 1970
+    mov r8,   31_536_000_000 ;ms in year
+    mul r8
+    mov r9,   rax
+
+    xor rax,  rax
+    xor rdx,  rdx
+    mov ax, word [rcx+2]
+    mov r8,   2_628_000_000 ;ms in month
+    mul r8
+    add r9,   rax
+
+    xor rax,  rax
+    xor rdx,  rdx
+    mov ax, word [rcx+6]
+    mov r8,   86_400_000 ;ms in day
+    mul r8
+    add r9,   rax
+
+    xor rax,  rax
+    xor rdx,  rdx
+    mov ax, word [rcx+8]
+    mov r8,   3_600_000 ;ms in hour
+    mul r8
+    add r9,   rax
+
+    xor rax,  rax
+    xor rdx,  rdx
+    mov ax, word [rcx+10]
+    mov r8,   60000 ;ms in minute
+    mul r8
+    add r9,   rax
+
+    xor rax,  rax
+    xor rdx,  rdx
+    mov ax, word [rcx+12]
+    mov r8,   1000 ;ms in sec
+    mul r8
+    add r9,   rax
+    
+    xor rax,  rax
+    mov ax, word [rcx+14]
+    add r9,   rax
+    
+    ;mov r8, qword 0x19DB1DED53E8000 ;unix time start
+    ;sub r9, r8
+    sub r9, 1_684_800_000 ;1970 years, 19 days & 12 hours
+    mov rax, r9
+    pop r9
+    pop r8
+    pop rdx
+    pop rcx
+ret
 
 copy_strf: ;src ptr rcx IN, dest ptr rdx IN, optional len r8 IN
     push_all
@@ -346,10 +343,6 @@ clear_strf: ;ptr rcx IN, optional len rdx IN
     clear_strf_loop:
         mov byte [rcx], 0
         inc       rcx
-        inc r14
-        push rcx
-        printi r14
-        pop rcx
     cmp byte [rcx], 0
     jne clear_strf_loop
     jmp clear_strf_ret
