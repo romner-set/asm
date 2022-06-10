@@ -12,13 +12,14 @@ extern HeapAlloc
 extern HeapFree
 extern GetSystemTime
 extern GetTimeZoneInformation
+extern Sleep
 
 
 section .rodata
     DEC_TABLE            db   "0123456789",0
     HEX_TABLE            db   "0123456789ABCDEF",0
     ALPHABET             db   "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/",0
-    CIPHERTEXT_RAW       db   "DePk6rqSKIcsDzx177WKCeD6uEYOo3iRkMszgy1sMJLD8rbSSP2J+FGF3L3yL8GmQQAA"
+    CIPHERTEXT_RAW       db   "DePk6rqSKIcsDzx177WKCeD6uEYOo3iRkMszgy1sMJLD8rbSSP2J+FGF3L3yL8GmQQAA",0
     CIPHERTEXT           db   3,30,15,36,58,43,42,18,10,8,28,44,3,51,49,53,59,59,22,10,2,30,3,58,46,4,24,14,40,55,34,17,36,12,44,51,32,50,53,44,12,9,11,3,60,43,27,18,18,15,54,9,62,5,6,5,55,11,55,50,11,60,6,38,16,16,0,0
     CRLF                 db   0x0D, 0x0A
     CR                   equ  0x0D
@@ -41,8 +42,9 @@ section .data
     INPUT_LEN         dq  0
 
     THREAD_COUNT      dq  0
-    OPS_PER_THREAD    dq  1
+    OPS_PER_THREAD    dq  20_000_000
     CURRENT           dq  0
+    CURRENT_ASCII     dq  0
     CURRENT_LENGTH    dq  0
 
     DECODED_BASE64    dq  0
@@ -63,9 +65,10 @@ section .text
 
     input_sa          db  "Input start_at value (empty for def.): ",0
 
-    start_w           db  "Starting with ",0
-    start_t           db  " threads & ",0
-    start_opti        db  " operations per thread-iteration.",0
+    start_a           db  "Starting at ",0
+    start_w           db  " with ",0
+    start_t           db  " threads @ ",0
+    start_opti        db  " ops/ti...",0
 
     ok    db  "SUCCESS",0
     errs  db  "ERROR CODE ",0
@@ -126,7 +129,7 @@ start:
     cmp qword  [INPUT_LEN], 0
     je  if_tc_null
         parse_str INPUT_BUFFER, [INPUT_LEN]
-        cmp  rax,  0
+        test rax, rax
         jne  if_tc_valid
             prints input_inv
             clear_str INPUT_BUFFER
@@ -172,13 +175,13 @@ start:
 ;--------------START AT SELECT--------------;
     heap_alloc MAX_KEY_SIZE
     mov [CURRENT], rax
+    heap_alloc MAX_KEY_SIZE, 0x8
+    mov [CURRENT_ASCII], rax
 
     call print_time_str
     input_sas: prints input_sa
     
     call input
-
-    call print_time_str
 
     cmp qword [INPUT_LEN], 0
     je  if_sa_null
@@ -194,12 +197,10 @@ start:
     jmp if_sa_null_end
     if_sa_null:
         mov rax,  [CURRENT]
-        mov qword [rax],          "AAA";,0
+        mov qword [rax], 0x000000 ;indexes corresponding to AAA
         mov qword [CURRENT_LENGTH], 3
         ;mov [CURRENT],           rax
     if_sa_null_end:
-    prints [CURRENT], 1, [CURRENT_LENGTH]
-    printi [CURRENT_LENGTH]
 
 ;--------------START COMPUTE ST--------------;
     heap_alloc CIPHERTEXT_LENGTH
@@ -208,45 +209,63 @@ start:
     mov [DECODED_UTF8], rax
 
     call    print_time_str
+    prints  start_a
+    call    current_to_str
+    prints [CURRENT_ASCII], 0, [CURRENT_LENGTH]
     prints  start_w
     printi [THREAD_COUNT]
     prints  start_t
     printi [OPS_PER_THREAD]
     prints  start_opti, 1
 
+    
+    mov r8,  [DECODED_BASE64]
+    mov r9,   CIPHERTEXT
+    mov r10, [CURRENT]
+    mov r11, [CURRENT_LENGTH]
+    xor r12, r12
+    
     compute_loop_inf:
         mov rcx, [OPS_PER_THREAD]
-
         compute_loop:
             xor rbx, rbx
-            mov r8,  [DECODED_BASE64]
-            mov r9,   CIPHERTEXT
-            mov r10, [CURRENT]
 
             ciphertext_loop:
-                inc rbx
-                mov r11, [r9+rbx]
+                mov rax, rbx
 
                 xor rdx, rdx
-                mov rax, rbx
-                div qword [CURRENT_LENGTH]
+                div qword r11
+                mov r12b, [r9+rbx]
 
-                sub  r11, [r10+rdx]
-                cmp  r11,  0
-                jge  ciphertext_no_underflow
-                    add r11, 64
+                sub  r12b, [r10+rdx]
+                test r12b,  r12b
+                jnl  ciphertext_no_underflow
+                    add r12b, 64
                 ciphertext_no_underflow:
-                add  r11,     ALPHABET
-                mov  r12b,   [r11]
-                mov [r8+rbx], r12b
+                mov  r14,     ALPHABET
+                mov  r13b,   [r12+r14]
+                mov [r8+rbx], r13b
 
+                inc rbx
             cmp rbx, CIPHERTEXT_LENGTH
             jl  ciphertext_loop
 
-            ;prints [DECODED_BASE64]
-        loop compute_loop
+            call cadd_one
+        dec rcx
+        jnz compute_loop
 
-        ;printi rcx, 1
+
+        push_all
+        mov    [CURRENT_LENGTH], r11
+
+        call print_time_str
+
+        call    current_to_str
+        prints [CURRENT_ASCII], 1, r11
+
+        ;mov rcx, 250
+        ;call Sleep
+        pop_all
     jmp compute_loop_inf
 
 
@@ -258,6 +277,24 @@ start:
     xor  rcx, rcx
 call ExitProcess
 
+
+cadd_one:; r10 ptr IN, r11 len IN/OUT, r15 EMPTY PLS
+    mov r15, r10
+    mov rbx, r11
+
+    cadd_one_loop:
+        cmp byte [r15], 63
+        je cadd_one_eq63
+            inc byte [r15]
+            ret
+        cadd_one_eq63:
+        mov byte [r15], 0
+        inc r15
+    dec rbx
+    jnz cadd_one_loop
+
+    inc r11
+ret
 
 
 print_time_str: ;rcx optional hour offset
@@ -364,78 +401,35 @@ min_to_hmin: ;rcx min IN/OUT, rax h OUT
     pop rdx
 ret
 
-get_unix_time: ;rax OUT
-    push rcx
-    push rdx
-    push r8
-    push r9
-    mov rcx, [CURRENT_TIME]
-    call GetSystemTime
+current_to_str: ;no args, affects [CURRENT_ASCII]
+    push_all
 
-    mov rcx, [CURRENT_TIME]
-    xor rax,  rax
-    xor rdx,  rdx
-    mov ax, word [rcx]
-    sub ax, 1970
-    mov r8,   31_536_000_000 ;ms in year
-    mul r8
-    mov r9,   rax
+    mov rax, [CURRENT]
+    mov rcx,  ALPHABET
+    mov rdx, [CURRENT_ASCII]
+    mov r8,  [CURRENT_LENGTH]
 
-    xor rax,  rax
-    xor rdx,  rdx
-    mov ax, word [rcx+2]
-    mov r8,   2_628_000_000 ;ms in month
-    mul r8
-    add r9,   rax
+    xor rbx, rbx
+    xor r9,  r9
 
-    xor rax,  rax
-    xor rdx,  rdx
-    mov ax, word [rcx+6]
-    mov r8,   86_400_000 ;ms in day
-    mul r8
-    add r9,   rax
+    current_to_str_loop:
+        dec r8
 
-    xor rax,  rax
-    xor rdx,  rdx
-    mov ax, word [rcx+8]
-    mov r8,   3_600_000 ;ms in hour
-    mul r8
-    add r9,   rax
+        mov  bl, [rax+r8]
+        mov  r9b, [rcx+rbx]
+        mov [rdx+r8], r9b
+    test r8, r8
+    jg  current_to_str_loop
 
-    xor rax,  rax
-    xor rdx,  rdx
-    mov ax, word [rcx+10]
-    mov r8,   60000 ;ms in minute
-    mul r8
-    add r9,   rax
-
-    xor rax,  rax
-    xor rdx,  rdx
-    mov ax, word [rcx+12]
-    mov r8,   1000 ;ms in sec
-    mul r8
-    add r9,   rax
-    
-    xor rax,  rax
-    mov ax, word [rcx+14]
-    add r9,   rax
-    
-    ;mov r8, qword 0x19DB1DED53E8000 ;unix time start
-    ;sub r9, r8
-    sub r9, 1_684_800_000 ;1970 years, 19 days & 12 hours
-    mov rax, r9
-    pop r9
-    pop r8
-    pop rdx
-    pop rcx
+    pop_all
 ret
 
 copy_strf: ;src ptr rcx IN, dest ptr rdx IN, optional len r8 IN
     push_all
 
-    cmp r8, 0
-    je  copy_strf_ret
-    cmp r8, -1
+    test r8, r8
+    je   copy_strf_ret
+    cmp  r8, -1
     jne copy_strf_len_known
     copy_strf_loop:
         mov  r9b,  [rcx]
@@ -463,9 +457,9 @@ ret
 clear_strf: ;ptr rcx IN, optional len rdx IN
     push_all
 
-    cmp rdx, 0
-    je  clear_strf_ret
-    cmp rdx, -1
+    test rdx, rdx
+    je   clear_strf_ret
+    cmp  rdx, -1
     jne clear_strf_len_known
     clear_strf_loop:
         mov byte [rcx], 0
@@ -521,8 +515,8 @@ parse_string: ;string ptr rcx IN, len rdx IN, u64 rax OUT
         pop rdx
 
         inc r8
-    dec rdx
-    cmp rdx, 0
+    dec  rdx
+    test rdx, rdx
     jne  parse_string_loop
 ret
 parse_string_invalid:
@@ -533,8 +527,8 @@ ret
 endlf: ;number of endls rcx IN
     push_all
     endlf_loop:
-    cmp rcx, 0
-    je  endlf_ret
+    test rcx, rcx
+    je   endlf_ret
         push rcx
         
         mov  rcx, [STDOUT];rax
@@ -552,7 +546,7 @@ ret
 print_str: ;string ptr rcx IN, optional len rdx IN
     push_all
 
-    cmp rdx, 0
+    test rdx, rdx
     je  print_str_ret
     cmp rdx, -1
     jne print_str_len_known
@@ -619,16 +613,16 @@ print_int: ;number rcx IN, numerical base rdx IN, format bool r8 IN
     print_int_loop:
         inc r9
 
-        cmp r8,  0
-        je  if_bin_end
-        cmp r14, 2
-        jne if_bin_end
+        test r8,  r8
+        je   if_bin_end
+        cmp  r14, 2
+        jne  if_bin_end
             push rax
             mov  rax, r9
             xor  rdx, rdx
             mov  rcx, 5  ;should be 4 idk why it has to be 5
             div  rcx
-            cmp  rdx, 0
+            test rdx, rdx
             pop  rax
             jne if_bin_end
                 dec  rsp
@@ -644,13 +638,13 @@ print_int: ;number rcx IN, numerical base rdx IN, format bool r8 IN
         mov  r11b, [rdx]
         dec  rsp
         mov [rsp],  r11b
-    cmp rax, 0
-    jne print_int_loop
+    test rax, rax
+    jne  print_int_loop
 
-    cmp r8,  0
-    je  if_hex_end
-    cmp r14, 16
-    jne if_hex_end
+    test r8,  r8
+    je   if_hex_end
+    cmp  r14, 16
+    jne  if_hex_end
         dec  rsp
         mov  byte [rsp], 'x'
         dec  rsp

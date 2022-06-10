@@ -91,8 +91,11 @@
 %endmacro
 
 %macro heap_alloc 1
+    heap_alloc %1, 0
+%endmacro
+%macro heap_alloc 2
     mov r8,   %1
-    mov rdx,  0
+    mov rdx,  %2
     mov rcx, [HEAP_HANDLE]
     call HeapAlloc
     check_err
@@ -127,7 +130,14 @@
 %endmacro
 
 %macro q 1
+    ;push_all
     push qword %1
     prints rsp
     add rsp, 8
+    ;pop_all
+%endmacro
+%macro qp 1
+    push_all
+    q %1
+    pop_all
 %endmacro
