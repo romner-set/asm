@@ -42,8 +42,8 @@ section .data
 
     THREAD_COUNT      dq  0
     OPS_PER_THREAD    dq  1
-    START_AT          dq  0
-    START_AT_LEN      dq  0
+    CURRENT           dq  0
+    CURRENT_LENGTH    dq  0
 
     DECODED_BASE64    dq  0
     DECODED_UTF8      dq  0
@@ -62,6 +62,10 @@ section .text
     input_opt_o       db  " operations per thread.",0
 
     input_sa          db  "Input start_at value (empty for def.): ",0
+
+    start_w           db  "Starting with ",0
+    start_t           db  " threads & ",0
+    start_opti        db  " operations per thread-iteration.",0
 
     ok    db  "SUCCESS",0
     errs  db  "ERROR CODE ",0
@@ -167,7 +171,7 @@ start:
 
 ;--------------START AT SELECT--------------;
     heap_alloc MAX_KEY_SIZE
-    mov [START_AT], rax
+    mov [CURRENT], rax
 
     call print_time_str
     input_sas: prints input_sa
@@ -184,27 +188,67 @@ start:
             clear_str INPUT_BUFFER
             jmp    input_sas
         if_sa_valid:
-            copy_str   INPUT_BUFFER, [START_AT]
+            copy_str   INPUT_BUFFER, [CURRENT]
             push qword [INPUT_LEN]
-            pop  qword [START_AT_LEN]
+            pop  qword [CURRENT_LENGTH]
     jmp if_sa_null_end
     if_sa_null:
-        mov rax,  [START_AT]
+        mov rax,  [CURRENT]
         mov qword [rax],          "AAA";,0
-        mov qword [START_AT_LEN], 3
-        ;mov [START_AT],           rax
+        mov qword [CURRENT_LENGTH], 3
+        ;mov [CURRENT],           rax
     if_sa_null_end:
-    prints [START_AT], 1, [START_AT_LEN]
-    printi [START_AT_LEN]
+    prints [CURRENT], 1, [CURRENT_LENGTH]
+    printi [CURRENT_LENGTH]
 
 ;--------------START COMPUTE ST--------------;
     heap_alloc CIPHERTEXT_LENGTH
     mov [DECODED_BASE64], rax
     heap_alloc DECODED_UTF8_LENGTH
     mov [DECODED_UTF8], rax
-    ;compute_loop:
-    ;    mov rcx, OPS_PER_THREAD
-    ;jmp compute_loop
+
+    call    print_time_str
+    prints  start_w
+    printi [THREAD_COUNT]
+    prints  start_t
+    printi [OPS_PER_THREAD]
+    prints  start_opti, 1
+
+    compute_loop_inf:
+        mov rcx, [OPS_PER_THREAD]
+
+        compute_loop:
+            xor rbx, rbx
+            mov r8,  [DECODED_BASE64]
+            mov r9,   CIPHERTEXT
+            mov r10, [CURRENT]
+
+            ciphertext_loop:
+                inc rbx
+                mov r11, [r9+rbx]
+
+                xor rdx, rdx
+                mov rax, rbx
+                div qword [CURRENT_LENGTH]
+
+                sub  r11, [r10+rdx]
+                cmp  r11,  0
+                jge  ciphertext_no_underflow
+                    add r11, 64
+                ciphertext_no_underflow:
+                add  r11,     ALPHABET
+                mov  r12b,   [r11]
+                mov [r8+rbx], r12b
+
+            cmp rbx, CIPHERTEXT_LENGTH
+            jl  ciphertext_loop
+
+            ;prints [DECODED_BASE64]
+        loop compute_loop
+
+        ;printi rcx, 1
+    jmp compute_loop_inf
+
 
 
 
