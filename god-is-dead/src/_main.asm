@@ -15,12 +15,19 @@ extern GetTimeZoneInformation
 
 
 section .rodata
-    dec_table         db  "0123456789",0
-    hex_table         db  "0123456789ABCDEF",0
-    CRLF              db  0x0D, 0x0A
-    STD_INPUT_HANDLE  equ -10
-    STD_OUTPUT_HANDLE equ -11
-    MAX_KEY_SIZE      equ 16
+    DEC_TABLE            db   "0123456789",0
+    HEX_TABLE            db   "0123456789ABCDEF",0
+    ALPHABET             db   "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/",0
+    CIPHERTEXT_RAW       db   "DePk6rqSKIcsDzx177WKCeD6uEYOo3iRkMszgy1sMJLD8rbSSP2J+FGF3L3yL8GmQQAA"
+    CIPHERTEXT           db   3,30,15,36,58,43,42,18,10,8,28,44,3,51,49,53,59,59,22,10,2,30,3,58,46,4,24,14,40,55,34,17,36,12,44,51,32,50,53,44,12,9,11,3,60,43,27,18,18,15,54,9,62,5,6,5,55,11,55,50,11,60,6,38,16,16,0,0
+    CRLF                 db   0x0D, 0x0A
+    CR                   equ  0x0D
+    LF                   equ  0x0A
+    STD_INPUT_HANDLE     equ -10
+    STD_OUTPUT_HANDLE    equ -11
+    MAX_KEY_SIZE         equ  16
+    CIPHERTEXT_LENGTH    equ  68
+    DECODED_UTF8_LENGTH  equ  51
 
 section .data
     HEAP_HANDLE       dq  0
@@ -38,6 +45,9 @@ section .data
     START_AT          dq  0
     START_AT_LEN      dq  0
 
+    DECODED_BASE64    dq  0
+    DECODED_UTF8      dq  0
+
 section .text
     global start
 
@@ -48,7 +58,7 @@ section .text
     input_tc          db  "Input thread count (empty for default): ",0
     input_tc_t        db  " threads.",0
 
-    input_opt         db  "Input operations per thread-iteration (empty for def.):",0
+    input_opt         db  "Input operations per thread-iteration (empty for def.): ",0
     input_opt_o       db  " operations per thread.",0
 
     input_sa          db  "Input start_at value (empty for def.): ",0
@@ -78,10 +88,6 @@ start:
     heap_alloc 172
     mov [CURRENT_TIMEZONE], rax
 
-    call print_time_str
-
-    endl
-
 ;--------------GET LCC--------------;
     heap_alloc 64
     
@@ -106,9 +112,12 @@ start:
     heap_alloc 256
     mov [INPUT_BUFFER], rax
 
+    call print_time_str
     input_tcs: prints input_tc
 
     call input
+    
+    call print_time_str
 
     cmp qword  [INPUT_LEN], 0
     je  if_tc_null
@@ -130,9 +139,12 @@ start:
     prints input_tc_t, 1
 
 ;--------------OPS PER THREAD SELECT--------------;
+    call print_time_str
     input_opts: prints input_opt
 
     call input
+    
+    call print_time_str
 
     cmp qword  [INPUT_LEN], 0
     je  if_opt_null
@@ -157,9 +169,12 @@ start:
     heap_alloc MAX_KEY_SIZE
     mov [START_AT], rax
 
+    call print_time_str
     input_sas: prints input_sa
     
     call input
+
+    call print_time_str
 
     cmp qword [INPUT_LEN], 0
     je  if_sa_null
@@ -174,17 +189,27 @@ start:
             pop  qword [START_AT_LEN]
     jmp if_sa_null_end
     if_sa_null:
+        mov rax,  [START_AT]
         mov qword [rax],          "AAA";,0
         mov qword [START_AT_LEN], 3
-        mov [START_AT],           rax
+        ;mov [START_AT],           rax
     if_sa_null_end:
     prints [START_AT], 1, [START_AT_LEN]
     printi [START_AT_LEN]
-    
+
 ;--------------START COMPUTE ST--------------;
+    heap_alloc CIPHERTEXT_LENGTH
+    mov [DECODED_BASE64], rax
+    heap_alloc DECODED_UTF8_LENGTH
+    mov [DECODED_UTF8], rax
+    ;compute_loop:
+    ;    mov rcx, OPS_PER_THREAD
+    ;jmp compute_loop
+
 
 
     endl 2
+    call print_time_str
     prints ok
     xor  rcx, rcx
 call ExitProcess
@@ -192,49 +217,107 @@ call ExitProcess
 
 
 print_time_str: ;rcx optional hour offset
-    mov rcx, [CURRENT_TIME]
-    call GetSystemTime
-    mov rcx, [CURRENT_TIME]
-    
-    mov  ax, word [rcx+8]
-    push rax
-
     mov   rcx, [CURRENT_TIMEZONE]
     call  GetTimeZoneInformation
     mov   rcx, [CURRENT_TIMEZONE]
-    movsx rdx, dword [rcx]
-    ;push_all
-    ;printi rdx,1,2
-    ;pop_all
+    movsx rdx,  dword [rcx]
+    cmp   rax,  2
+    jne   if_dst_end
+        movsx rax, dword [rcx+168]
+        add   rdx, rax
+    if_dst_end:
+    neg   rdx
 
-    pop rax
-    ;add rax, rdx
+    mov  rcx, rdx
+    call min_to_hmin
+    push rcx
+    push rax
+
+
+    mov  rcx, [CURRENT_TIME]
+    call GetSystemTime
+    mov  rcx, [CURRENT_TIME]
+    
+    xor rax, rax
+    mov  ax, word [rcx+8]
+
+    pop rdx
+    add rax, rdx
+    
+    cmp rax, 10
+    jge if_hours_lower_10_end
+        push qword '0'
+        prints rsp, 0,1
+        add rsp, 8
+    if_hours_lower_10_end:
 
     printi rax
     push qword ':'
     prints rsp, 0, 1
     
+    add rsp, 8
     mov rcx, [CURRENT_TIME]
     mov ax, word [rcx+10]
+    pop rdx
+    add rax, rdx
+    cmp rax, 10
+    jge if_mins_lower_10_end
+        push qword '0'
+        prints rsp, 0,1
+        add rsp, 8
+    if_mins_lower_10_end:
     printi rax
-    prints rsp
+    push qword ':'
+    prints rsp, 0, 1
     
     mov rcx, [CURRENT_TIME]
     mov ax, word [rcx+12]
+    cmp rax, 10
+    jge if_secs_lower_10_end
+        push qword '0'
+        prints rsp, 0,1
+        add rsp, 8
+    if_secs_lower_10_end:
     printi rax
     push qword '.'
-    prints rsp
-    add rsp,16
+    prints rsp, 0, 1
 
     xor rax, rax
     
     mov rcx, [CURRENT_TIME]
     mov ax, word [rcx+14]
+    cmp rax, 10
+    jge if_ms_lower_10_end
+        push qword '0'
+        prints rsp, 0,1
+        add rsp, 8
+    if_ms_lower_10_end:
+    cmp rax, 100
+    jge if_ms_lower_100_end
+        push qword '0'
+        prints rsp, 0,1
+        add rsp, 8
+    if_ms_lower_100_end:
     printi rax
+
+    push qword ': '
+    prints rsp, 0, 2
+    add rsp, 24
 ret
 
-min_to_hmin:
+min_to_hmin: ;rcx min IN/OUT, rax h OUT
+    push rdx
 
+    xor rdx, rdx
+    mov rax, rcx
+    cqo
+
+    mov rcx, 60
+    idiv rcx
+
+    mov rcx, rdx
+
+    pop rdx
 ret
 
 get_unix_time: ;rax OUT
@@ -383,7 +466,7 @@ parse_string: ;string ptr rcx IN, len rdx IN, u64 rax OUT
     parse_string_loop:
         mov       r9b,   byte [r8]
         movq      xmm0,  r9
-        pcmpistri xmm0, [dec_table], 0b_00_00_11_00
+        pcmpistri xmm0, [DEC_TABLE], 0b_00_00_11_00
         cmp       rcx,   16
         je        parse_string_invalid
 
@@ -512,7 +595,7 @@ print_int: ;number rcx IN, numerical base rdx IN, format bool r8 IN
         xor rdx,  rdx
         div qword r14
 
-        mov  r10,   hex_table
+        mov  r10,   HEX_TABLE
         add  rdx,   r10
         mov  r11b, [rdx]
         dec  rsp
