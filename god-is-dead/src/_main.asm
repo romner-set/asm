@@ -250,22 +250,21 @@ start:
             cmp rbx, CIPHERTEXT_LENGTH
             jl  ciphertext_loop
 
+            push_all
+            mov [CURRENT_LENGTH], r11
+            call print_time_str
+            call current_to_str
+            prints [CURRENT_ASCII], 0, r11
+            q ": "
+            prints [DECODED_BASE64], 1, CIPHERTEXT_LENGTH
+
+            mov rcx, 250
+            call Sleep
+            pop_all
+
             call cadd_one
         dec rcx
         jnz compute_loop
-
-
-        push_all
-        mov    [CURRENT_LENGTH], r11
-
-        call print_time_str
-
-        call    current_to_str
-        prints [CURRENT_ASCII], 1, r11
-
-        ;mov rcx, 250
-        ;call Sleep
-        pop_all
     jmp compute_loop_inf
 
 
