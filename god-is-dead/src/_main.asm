@@ -13,6 +13,7 @@ extern HeapFree
 extern GetSystemTime
 extern GetTimeZoneInformation
 extern Sleep
+extern CreateThread
 
 
 section .rodata
@@ -31,24 +32,27 @@ section .rodata
     DECODED_UTF8_LENGTH  equ  51
 
 section .data
-    HEAP_HANDLE       dq  0
-    STDOUT            dq  0
-    STDIN             dq  0
+    HEAP_HANDLE           dq  0
+    STDOUT                dq  0
+    STDIN                 dq  0
 
-    CURRENT_TIME      dq  0
-    CURRENT_TIMEZONE  dq  0
+    CURRENT_TIME          dq  0
+    CURRENT_TIMEZONE      dq  0
 
-    INPUT_BUFFER      dq  0
-    INPUT_LEN         dq  0
+    INPUT_BUFFER          dq  0
+    INPUT_LEN             dq  0
 
-    THREAD_COUNT      dq  0
-    OPS_PER_THREAD    dq  20_000_000
-    CURRENT           dq  0
-    CURRENT_ASCII     dq  0
-    CURRENT_LENGTH    dq  0
+    THREAD_COUNT          dq  0
+    OPS_PER_THREAD        dq  20_000_000
+    CURRENT               dq  0
+    CURRENT_ASCII         dq  0
+    CURRENT_LENGTH        dq  0
 
-    DECODED_BASE64    dq  0
-    DECODED_UTF8      dq  0
+    DECODED_BASE64        dq  0
+    DECODED_UTF8          dq  0
+
+    CADD_THREAD_JUMP      dq  0
+    CADD_THREAD_JUMP_LEN  dq  0
 
 section .text
     global start
@@ -202,7 +206,7 @@ start:
         ;mov [CURRENT],           rax
     if_sa_null_end:
 
-;--------------START COMPUTE ST--------------;
+;--------------COMPUTE - START TEXT--------------;
     heap_alloc CIPHERTEXT_LENGTH
     mov [DECODED_BASE64], rax
     heap_alloc DECODED_UTF8_LENGTH
@@ -216,15 +220,113 @@ start:
     printi [THREAD_COUNT]
     prints  start_t
     printi [OPS_PER_THREAD]
-    prints  start_opti, 1
+    prints  start_opti, 2
 
-    
+;--------------COMPUTE - SPAWN THREADS--------------;
+    ;mov rcx, [THREAD_COUNT]
+
+    mov  rcx,  0
+    mov  rdx,  1024 ;1kB stack should be more than enough for printing etc
+    mov  r8,   compute_thread
+    mov  r9,   1
+    push qword 0
+    call CreateThread
+
+    mov rcx, 10000
+    call Sleep
+
+
+    endl 2
+    call print_time_str
+    prints ok
+    xor  rcx, rcx
+call ExitProcess
+
+; r10 ptr IN, r11 len IN/OUT, r15 & rbx UNUSED PLS
+%macro cadd_one 0
+    mov r15, r10
+    mov rbx, r11
+
+    %%cadd_one_loop:
+        cmp byte [r15], 63
+        je %%cadd_one_eq63
+            inc byte [r15]
+            jmp %%cadd_one_end
+        %%cadd_one_eq63:
+        mov byte [r15], 0
+        inc r15
+    dec rbx
+    jnz %%cadd_one_loop
+
+    inc r11
+
+    %%cadd_one_end:
+%endmacro
+
+; r10 ptr IN, r11 len IN/OUT, r15 ptr2 IN, rbx & rsi UNUSED PLS, all but lowest byte of rdi CLEARED PLS
+%macro cadd 0
+    xor rbx, rbx
+    xor rsi, rsi
+    ;xor rdi, rdi
+
+    %%cadd_loop:
+        mov dil, byte [r15+rbx]
+        add byte [r10], sil ;rsi lowest byte
+        add byte [r10], dil ;rdi lowest byte
+
+        cmp byte [r10], 64
+        setge     sil
+        jnge %%cadd_ge_64_end
+            sub byte [r10], 64
+        %%cadd_ge_64_end:
+
+        inc r10
+    inc rbx
+    cmp rbx, [CADD_THREAD_JUMP_LEN]
+    jne %%cadd_loop
+
+    sub r10, [CADD_THREAD_JUMP_LEN]
+    add r11, rsi
+%endmacro
+
+compute_thread:
+    heap_alloc r11, 0x8
+    ;mov byte [rax], 0
+    mov byte [rax+3], 3
+    ;mov byte [rax+2], 0
+    mov r15, rax
+
+    mov qword [CADD_THREAD_JUMP_LEN], 4
+
     mov r8,  [DECODED_BASE64]
     mov r9,   CIPHERTEXT
     mov r10, [CURRENT]
     mov r11, [CURRENT_LENGTH]
     xor r12, r12
+    xor rdi, rdi
     
+    cadd
+    ;mov byte [r15], 0
+    ;mov byte [r15+1], 0
+    ;cadd
+
+    push rcx
+    q "thre"
+    q "ad #"
+    pop rcx
+    printi rcx
+    q " rep"
+    q "orti"
+    q "ng i"
+    q "n!"
+    endl
+    
+    mov    [CURRENT_LENGTH], r11
+    call    current_to_str
+    prints [CURRENT_ASCII], 0, [CURRENT_LENGTH]
+
+    xor rax, rax
+ret
     compute_loop_inf:
         mov rcx, [OPS_PER_THREAD]
         compute_loop:
@@ -262,38 +364,11 @@ start:
             call Sleep
             pop_all
 
-            call cadd_one
+            cadd_one
         dec rcx
         jnz compute_loop
     jmp compute_loop_inf
-
-
-
-
-    endl 2
-    call print_time_str
-    prints ok
-    xor  rcx, rcx
-call ExitProcess
-
-
-cadd_one:; r10 ptr IN, r11 len IN/OUT, r15 EMPTY PLS
-    mov r15, r10
-    mov rbx, r11
-
-    cadd_one_loop:
-        cmp byte [r15], 63
-        je cadd_one_eq63
-            inc byte [r15]
-            ret
-        cadd_one_eq63:
-        mov byte [r15], 0
-        inc r15
-    dec rbx
-    jnz cadd_one_loop
-
-    inc r11
-ret
+ret ;shouldn't get here
 
 
 print_time_str: ;rcx optional hour offset
