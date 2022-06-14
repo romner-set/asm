@@ -44,12 +44,16 @@
 %endmacro
 
 %macro printb 2
-    printb %1, %2, 0
+    printb %1, %2, 0, 16
 %endmacro
 %macro printb 3
+    printb %1, %2, %3, 16
+%endmacro
+%macro printb 4
     ;push_all
     mov rcx, %1
     mov rdx, %2
+    mov r8,  %4
     call print_bytes
     endl %3
     ;pop_all

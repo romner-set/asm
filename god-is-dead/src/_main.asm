@@ -214,7 +214,7 @@ start:
 
     call    print_time_str
     prints  start_a
-    call    current_to_str
+    call    current_to_str_noarg
     prints [CURRENT_ASCII], 0, [CURRENT_LENGTH]
     prints  start_w
     printi [THREAD_COUNT]
@@ -222,17 +222,43 @@ start:
     printi [OPS_PER_THREAD]
     prints  start_opti, 2
 
+;--------------COMPUTE - INIT CADD_THREAD_JUMP--------------;
+    heap_alloc MAX_KEY_SIZE, 0x8
+    mov [CADD_THREAD_JUMP], rax
+
+    mov rax,  [THREAD_COUNT]
+    dec rax
+    mul qword [OPS_PER_THREAD]
+
+    mov rcx, rax
+
+    mov rax, [CADD_THREAD_JUMP]
+    CADD_THREAD_JUMP_to_b64_loop:
+        mov  rdx,  rcx
+        and  rdx,  63  ;x%y == x & (y-1)  =>  rcx%64 == rcx & 63
+        mov byte [rax], dl
+        ;push_all
+        ;    printi rdx
+        ;    q " "
+        ;pop_all
+        inc  rax
+        shr  rcx,  6   ;64 == 2^6
+    jnz CADD_THREAD_JUMP_to_b64_loop
+
+    ;endl
+    ;printb [CADD_THREAD_JUMP], MAX_KEY_SIZE, 1, 10
+
 ;--------------COMPUTE - SPAWN THREADS--------------;
     ;mov rcx, [THREAD_COUNT]
 
     mov  rcx,  0
     mov  rdx,  1024 ;1kB stack should be more than enough for printing etc
     mov  r8,   compute_thread
-    mov  r9,   1
+    mov  r9,   58
     push qword 0
     call CreateThread
 
-    mov rcx, 10000
+    mov rcx, 1000
     call Sleep
 
 
@@ -290,39 +316,22 @@ call ExitProcess
 %endmacro
 
 compute_thread:
-    heap_alloc r11, 0x8
-    ;mov byte [rax], 0
-    mov byte [rax+3], 3
-    ;mov byte [rax+2], 0
-    mov r15, rax
-
-    mov qword [CADD_THREAD_JUMP_LEN], 4
+    mov r13, rcx
 
     mov r8,  [DECODED_BASE64]
     mov r9,   CIPHERTEXT
     mov r10, [CURRENT]
     mov r11, [CURRENT_LENGTH]
+    mov r15, [CADD_THREAD_JUMP]
     xor r12, r12
     xor rdi, rdi
-    
-    cadd
-    ;mov byte [r15], 0
-    ;mov byte [r15+1], 0
-    ;cadd
 
-    push rcx
     q "thre"
     q "ad #"
-    pop rcx
-    printi rcx
-    q " rep"
-    q "orti"
-    q "ng i"
-    q "n!"
-    endl
+    printi r13, 1
     
-    mov    [CURRENT_LENGTH], r11
-    call    current_to_str
+    ;mov    [CURRENT_LENGTH], r11
+    call    current_to_str_noarg
     prints [CURRENT_ASCII], 0, [CURRENT_LENGTH]
 
     xor rax, rax
@@ -475,7 +484,29 @@ min_to_hmin: ;rcx min IN/OUT, rax h OUT
     pop rdx
 ret
 
-current_to_str: ;no args, affects [CURRENT_ASCII]
+current_to_str_noarg: ;no args, affects [CURRENT_ASCII]
+    push_all
+
+    mov rax, [CURRENT]
+    mov rcx,  ALPHABET
+    mov rdx, [CURRENT_ASCII]
+    mov r8,  [CURRENT_LENGTH]
+
+    xor rbx, rbx
+    xor r9,  r9
+
+    current_to_str_loop:
+        dec r8
+
+        mov  bl, [rax+r8]
+        mov  r9b, [rcx+rbx]
+        mov [rdx+r8], r9b
+    test r8, r8
+    jg  current_to_str_loop
+
+    pop_all
+ret
+current_to_str: ;r10 current IN, r11 current len IN,
     push_all
 
     mov rax, [CURRENT]
@@ -642,7 +673,7 @@ print_str: ;string ptr rcx IN, optional len rdx IN
     pop_all
 ret
 
-print_bytes: ;ptr rcx IN, length rdx IN
+print_bytes: ;ptr rcx IN, length rdx IN, base r8 IN
     push_all
 
     push rcx
@@ -650,17 +681,19 @@ print_bytes: ;ptr rcx IN, length rdx IN
     pop  rdx
 
     print_bytes_loop:
-        inc     rdx
-
+        push   r8
         push   rcx
         push   rdx
         mov    cl, byte [rdx]
-        printi rcx, 0, 16, 0
-        push   byte ' '
+        printi rcx, 0, r8, 0
+        push   qword ' '
         prints rsp, 0, 1
-        dec    rsp
+        pop    rdx
         pop    rdx
         pop    rcx
+        pop    r8
+
+        inc     rdx
     loop print_bytes_loop
 
     pop_all
