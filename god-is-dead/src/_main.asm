@@ -313,6 +313,9 @@ call ExitProcess
 
     sub r10, [CADD_THREAD_JUMP_LEN]
     add r11, rsi
+
+    cmp   r11, [CADD_THREAD_JUMP_LEN]
+    cmovl r11, [CADD_THREAD_JUMP_LEN]
 %endmacro
 
 compute_thread:
