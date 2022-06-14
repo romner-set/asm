@@ -287,16 +287,20 @@ call ExitProcess
 
     sub r10, [CADD_THREAD_JUMP_LEN]
     add r11, rsi
+
+    cmp   r11, [CADD_THREAD_JUMP_LEN]
+    cmovl r11, [CADD_THREAD_JUMP_LEN]
 %endmacro
 
 compute_thread:
-    heap_alloc r11, 0x8
+    heap_alloc 4
+    , 0x8
     ;mov byte [rax], 0
-    mov byte [rax+3], 3
+    mov byte [rax+2], 64
     ;mov byte [rax+2], 0
     mov r15, rax
 
-    mov qword [CADD_THREAD_JUMP_LEN], 4
+    mov qword [CADD_THREAD_JUMP_LEN], 3
 
     mov r8,  [DECODED_BASE64]
     mov r9,   CIPHERTEXT
